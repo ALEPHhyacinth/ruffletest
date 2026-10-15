@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ruffle SWF Player</title>
+<style>
+  :root { --bg:#14161a; --panel:#1d2025; --line:#2e333b; --text:#e6e8eb; --dim:#8b929c; --accent:#5cc8a8; --danger:#e5645a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, sans-serif; min-height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; flex-wrap:wrap; gap:.6rem; align-items:center; padding:.75rem 1rem; background:var(--panel); border-bottom:1px solid var(--line); }
+  h1 { font-size:1.05rem; margin:0 auto 0 0; font-weight:600; }
+  button, label.btn { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:.45rem .8rem; font:inherit; cursor:pointer; }
+  button:hover, label.btn:hover { border-color:var(--accent); }
+  button:disabled { opacity:0.5; cursor:not-allowed; border-color:var(--line); }
+  button.primary { background:var(--accent); color:#0c1a15; border-color:var(--accent); font-weight:600; }
+  input[type=file] { position:absolute; opacity:0; width:0; height:0; }
+  main { flex:1; display:grid; grid-template-columns:1fr 280px; min-height:0; }
+  #stage { position:relative; display:flex; align-items:center; justify-content:center; padding:1rem; min-height:60vh; }
+  #holder { width:100%; height:100%; display:flex; }
+  #holder ruffle-player { width:100%; height:100%; min-height:480px; }
+  #drop { position:absolute; inset:1rem; border:2px dashed var(--line); border-radius:10px; display:flex; align-items:center; justify-content:center; text-align:center; color:var(--dim); pointer-events:none; }
+  #stage.loaded #drop { display:none; }
+  aside { background:var(--panel); border-left:1px solid var(--line); padding:1rem; overflow:auto; }
+  aside h2 { font-size:.95rem; margin:0 0 .5rem; }
+  aside .row { display:flex; flex-direction:column; gap:.5rem; margin-bottom:.75rem; }
+  #msg { color:var(--dim); font-size:.85rem; min-height:1.3em; margin:.5rem 0; }
+  .note { color:var(--dim); font-size:.8rem; margin-top:1rem; line-height:1.4; }
+  @media (max-width:800px) { main { grid-template-columns:1fr; } aside { border-left:0; border-top:1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>SWF Player</h1>
+  <span id="name"></span>
+  <label class="btn">Open SWF<input type="file" id="swfInput" accept=".swf"></label>
+  <button id="reload" disabled>Restart</button>
+</header>
+
+<main>
+  <div id="stage">
+    <div id="holder"></div>
+    <div id="drop"><div>Select or drop a .swf file to begin</div></div>
+  </div>
+
+  <aside>
+    <h2>Google Sites Save Manager</h2>
+    <div class="row">
+      <button class="primary" id="openSaveManager" disabled>Ruffle Save Manager</button>
+      <label class="btn">Load Manual .SOL File<input type="file" id="solInput" accept=".sol"></label>
+    </div>
+    <div id="msg"></div>
+    <p class="note"><strong>Google Sites Note:</strong> Due to iframe security restrictions on Google Sites, browser storage may reset when refreshing. Use Ruffle's Save Manager to export your <code>.sol</code> save file locally before closing the page.</p>
+  </aside>
+</main>
+
+<script>
+  window.RufflePlayer = window.RufflePlayer || {};
+  window.RufflePlayer.config = { autoplay: "auto", unmuteOverlay: "hidden", letterbox: "on", warnOnUnsupportedContent: false };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@ruffle-rs/ruffle"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  const stage = $("stage"), holder = $("holder"), msg = $("msg");
+  let player = null, current = null;
+
+  function say(t, bad) { msg.textContent = t; msg.style.color = bad ? "var(--danger)" : "var(--dim)"; }
+
+  async function playSwf(file) {
+    if (!window.RufflePlayer || !RufflePlayer.newest) { say("Ruffle script error.", true); return; }
+    const buf = await file.arrayBuffer();
+    current = { name: file.name, data: new Uint8Array(buf) };
+    start();
+  }
+
+  function start() {
+    if (!current) return;
+    if (player) { try { player.remove(); } catch (e) {} }
+    holder.innerHTML = "";
+    player = RufflePlayer.newest().createPlayer();
+    holder.appendChild(player);
+    player.load({ data: current.data.slice(), allowScriptAccess: true, autoplay: "on" });
+    stage.classList.add("loaded");
+    $("reload").disabled = false;
+    $("openSaveManager").disabled = false;
+    say("Game loaded.");
+  }
+
+  $("swfInput").addEventListener("change", e => { const f = e.target.files[0]; if (f) playSwf(f); e.target.value = ""; });
+  $("reload").addEventListener("click", start);
+
+  $("openSaveManager").addEventListener("click", () => {
+    if (player && typeof player.openSaveManager === "function") {
+      player.openSaveManager();
+    } else {
+      say("Load a game first.", true);
+    }
+  });
+
+  $("solInput").addEventListener("change", async e => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      // Attempt writing to Ruffle virtual storage if accessible
+      const key = file.name.replace(/\.sol$/i, "");
+      localStorage.setItem(key, String.fromCharCode.apply(null, bytes));
+      say("Imported " + file.name + ". Restarting game...");
+      if (current) start();
+    } catch (err) {
+      say("Google Sites blocked local storage access.", true);
+    }
+  });
+
+  ["dragenter", "dragover"].forEach(ev => stage.addEventListener(ev, e => e.preventDefault()));
+  ["dragleave", "drop"].forEach(ev => stage.addEventListener(ev, e => { e.preventDefault(); }));
+  stage.addEventListener("drop", e => {
+    const f = e.dataTransfer.files[0];
+    if (f && /\.swf$/i.test(f.name)) playSwf(f);
+  });
+</script>
+</body>
+</html>
